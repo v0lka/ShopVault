@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 	"shopvault/internal/database"
+	"shopvault/internal/middleware"
 	"shopvault/internal/models"
 )
 
@@ -111,7 +112,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(jwtSecret)
+
+	signingKey := jwtSecret
+	if val, ok := GetRuntimeConfig("jwt_secret"); ok {
+		if s, ok := val.(string); ok && s != "" {
+			signingKey = []byte(s)
+			log.Printf("Using runtime-configured JWT secret")
+		}
+	}
+
+	tokenString, err := token.SignedString(signingKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -124,9 +134,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		user.ID, sessionToken, expiresAt,
 	)
 
+	redirectURL := c.Query("redirect")
+
 	c.JSON(http.StatusOK, gin.H{
 		"token":         tokenString,
 		"session_token": sessionToken,
+		"redirect_url":  redirectURL,
 		"user": gin.H{
 			"id":        user.ID,
 			"email":     user.Email,
@@ -243,6 +256,60 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 	log.Printf("Password reset successful for %s", user.Email)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Password has been reset successfully"})
+}
+
+// UpdateProfile handles PUT /api/profile
+func (h *AuthHandler) UpdateProfile(c *gin.Context) {
+	userID, ok := middleware.GetUserFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	var req map[string]interface{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	// Build UPDATE query dynamically from all fields — no filtering
+	setClauses := []string{}
+	args := []interface{}{}
+	for key, value := range req {
+		setClauses = append(setClauses, fmt.Sprintf("%s = ?", key))
+		args = append(args, value)
+	}
+
+	if len(setClauses) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No fields to update"})
+		return
+	}
+
+	query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?",
+		joinStrings(setClauses, ", "))
+	args = append(args, userID)
+
+	_, err := database.DB.Exec(query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Profile updated successfully",
+		"fields":  len(req),
+	})
+}
+
+func joinStrings(strs []string, sep string) string {
+	result := ""
+	for i, s := range strs {
+		if i > 0 {
+			result += sep
+		}
+		result += s
+	}
+	return result
 }
 
 func containsAt(s string) bool {

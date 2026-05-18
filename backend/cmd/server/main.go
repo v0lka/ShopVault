@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"runtime/debug"
 
 	"github.com/gin-gonic/gin"
 	"shopvault/internal/database"
@@ -26,8 +28,28 @@ func main() {
 	uploadHandler := handlers.NewUploadHandler()
 	importHandler := handlers.NewImportHandler()
 	adminHandler := handlers.NewAdminHandler()
+	paymentsHandler := handlers.NewPaymentsHandler()
+	filesHandler := handlers.NewFilesHandler()
+	settingsHandler := handlers.NewSettingsHandler()
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Logger())
+	r.Use(func(c *gin.Context) {
+		defer func() {
+			if err := recover(); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":  fmt.Sprintf("Internal server error: %v", err),
+					"panic":  err,
+					"stack":  string(debug.Stack()),
+					"env":    os.Environ(),
+					"cwd":    func() string { d, _ := os.Getwd(); return d }(),
+					"pid":    os.Getpid(),
+				})
+				c.Abort()
+			}
+		}()
+		c.Next()
+	})
 
 	r.StaticFS("/uploads", http.Dir("./uploads"))
 	api := r.Group("/api")
@@ -41,6 +63,8 @@ func main() {
 			auth.POST("/reset-password", authHandler.ResetPassword)
 		}
 
+		api.PUT("/profile", middleware.AuthMiddleware(), authHandler.UpdateProfile)
+
 		api.GET("/products", productHandler.List)
 		api.GET("/products/search", productHandler.Search)
 		api.GET("/products/image-proxy", productHandler.ImageProxy)
@@ -48,6 +72,12 @@ func main() {
 
 		api.GET("/cart", cartHandler.GetCart)
 		api.POST("/cart/checkout", middleware.AuthMiddleware(), cartHandler.Checkout)
+
+		api.GET("/files/view", filesHandler.View)
+
+		api.POST("/payments/process", paymentsHandler.Process)
+
+		api.POST("/payments/capture", middleware.AuthMiddleware(), cartHandler.CapturePayment)
 
 		api.GET("/orders", middleware.AuthMiddleware(), orderHandler.List)
 		api.GET("/orders/:id", middleware.AuthMiddleware(), orderHandler.Get)
@@ -66,6 +96,7 @@ func main() {
 			admin.PUT("/products/:id", middleware.AdminMiddleware(), adminHandler.UpdateProduct)
 			admin.DELETE("/products/:id", middleware.AdminMiddleware(), adminHandler.DeleteProduct)
 			admin.POST("/import", middleware.AdminMiddleware(), importHandler.ImportFromURL)
+			admin.POST("/settings", middleware.AdminMiddleware(), settingsHandler.Update)
 		}
 
 		api.POST("/webhook/payment-callback", adminHandler.WebhookCallback)

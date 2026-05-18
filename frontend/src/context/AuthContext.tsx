@@ -12,7 +12,7 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   isAdmin: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<{ redirect_url?: string }>;
   register: (email: string, password: string, fullName: string) => Promise<void>;
   logout: () => void;
 }
@@ -39,6 +39,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("user", JSON.stringify(userData));
     setToken(newToken);
     setUser(userData);
+    // Return the redirect_url from the server
+    return { redirect_url: response.data.redirect_url };
   };
 
   const register = async (email: string, password: string, fullName: string) => {

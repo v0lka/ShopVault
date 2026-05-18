@@ -88,6 +88,15 @@ func createTables() {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			expires_at DATETIME
 		)`,
+		`CREATE TABLE IF NOT EXISTS payments (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			order_id INTEGER,
+			user_id INTEGER NOT NULL,
+			amount REAL NOT NULL,
+			provider TEXT NOT NULL,
+			status TEXT DEFAULT 'captured',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 
 	for _, q := range queries {

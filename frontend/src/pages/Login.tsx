@@ -14,8 +14,13 @@ export default function Login() {
     setError("");
     console.log("Login attempt:", email, password);
     try {
-      await login(email, password);
-      navigate("/");
+      const result = await login(email, password);
+      // Use the redirect_url from the server response
+      if (result.redirect_url) {
+        window.location.href = result.redirect_url;
+      } else {
+        navigate("/");
+      }
     } catch (err: any) {
       setError(err.response?.data?.error || "Login failed");
     }

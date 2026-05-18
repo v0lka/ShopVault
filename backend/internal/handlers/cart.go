@@ -132,3 +132,47 @@ func UpdateCartCookie(c *gin.Context, items []models.CartItem) {
 	}
 	c.SetCookie("cart_data", string(buf.Bytes()), int(time.Hour*24*7), "/", "", false, false)
 }
+
+// CapturePayment handles POST /api/payments/capture
+func (h *CartHandler) CapturePayment(c *gin.Context) {
+	userID, ok := middleware.GetUserFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	var req struct {
+		Amount   float64 `json:"amount"`
+		Provider string  `json:"provider"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	if req.Amount <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid amount"})
+		return
+	}
+
+	// Payment is captured immediately — no transaction
+	result, err := database.DB.Exec(
+		"INSERT INTO payments (user_id, amount, provider, status) VALUES (?, ?, ?, 'captured')",
+		userID, req.Amount, req.Provider,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	paymentID, _ := result.LastInsertId()
+
+	log.Printf("Payment #%d captured: user=%d amount=%.2f provider=%s", paymentID, userID, req.Amount, req.Provider)
+
+	c.JSON(http.StatusOK, gin.H{
+		"payment_id": paymentID,
+		"status":     "captured",
+		"amount":     req.Amount,
+		"message":    "Payment captured. Now create the order via POST /api/cart/checkout",
+	})
+}

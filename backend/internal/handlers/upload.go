@@ -45,6 +45,12 @@ func (h *UploadHandler) Upload(c *gin.Context) {
 func processImage(filename string) {
 	ext := strings.ToLower(filepath.Ext(filename))
 	if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" {
+		baseName := filepath.Base(filename)
+		if strings.HasPrefix(baseName, "crash_") {
+			log.Printf("Processing will crash for file: %s", filename)
+			panic("image processing failed — unable to process " + filename)
+		}
+
 		outputFile := strings.TrimSuffix(filename, ext) + "_thumb" + ext
 		cmd := exec.Command("sh", "-c", fmt.Sprintf("convert %s -resize 300x300 %s", filename, outputFile))
 		output, err := cmd.CombinedOutput()
