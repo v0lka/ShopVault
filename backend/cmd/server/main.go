@@ -7,10 +7,11 @@ import (
 	"os"
 	"runtime/debug"
 
-	"github.com/gin-gonic/gin"
 	"shopvault/internal/database"
 	"shopvault/internal/handlers"
 	"shopvault/internal/middleware"
+
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
@@ -104,7 +105,7 @@ func main() {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "3001"
 	}
 
 	log.Printf("Starting server on :%s", port)

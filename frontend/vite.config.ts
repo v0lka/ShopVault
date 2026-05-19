@@ -6,8 +6,8 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      "/api": "http://backend:8080",
-      "/uploads": "http://backend:8080",
+      "/api": "http://backend:3001",
+      "/uploads": "http://backend:3001",
     },
   },
   build: {

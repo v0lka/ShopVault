@@ -39,7 +39,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ## Access
 
 - **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8080
+- **Backend API**: http://localhost:3001
 
 ## Default Accounts
 
